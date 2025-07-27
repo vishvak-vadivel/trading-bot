@@ -17,7 +17,7 @@ BASE_URL = "https://api.alpaca.markets"
 
 # Timer start
 start = time.time()
-print("⏳ Starting backtest with strong momentum trend-following setup...")
+print("⏳ Starting backtest with improved signal set...")
 
 # Connect to Alpaca
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL)
@@ -25,7 +25,11 @@ api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL)
 # Tickers
 tickers = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
-    "META", "JPM", "XOM", "UNH", "TSLA"
+    "META", "JPM", "XOM", "UNH", "TSLA",
+    "BRK.B", "V", "JNJ", "PG", "MA",
+    "HD", "PEP", "KO", "AVGO", "COST",
+    "LLY", "MRK", "ADBE", "BAC", "CRM",
+    "NFLX", "ORCL", "INTC", "T", "WMT"
 ]
 
 market = "SPY"
@@ -38,65 +42,71 @@ def get_daily_close(symbol):
     return bars['close'].rename(symbol)
 
 print("📡 Fetching daily price data...")
+# Load price data for tickers + market
 df = pd.concat([get_daily_close(t) for t in tickers + [market]], axis=1).dropna()
 price = df[tickers]
-spy = df[market]
+
+# Use full ticker universe for maximum opportunity
+print("🔍 Using full ticker universe for maximum opportunity")
+selected_tickers = tickers
+price = price[selected_tickers]
+print(f"📈 Selected tickers: {selected_tickers}")
 
 # Strategy logic
-print("⚙️ Generating signals...")
+print("⚙️ Generating signals with loosened criteria...")
 
-# ✅ Clean trend-following (3-day > 20-day MA for strong breakouts)
+# Momentum: 3-day > 7-day MA for faster signals
 short_ma = price.rolling(3).mean()
-long_ma = price.rolling(20).mean()
+long_ma = price.rolling(7).mean()
 momentum = short_ma > long_ma
 
-downcross = short_ma < long_ma
+# Breakout: close > 3-day high (more frequent)
+breakout_high = price.rolling(3).max()
+breakout = price > breakout_high.shift(1)
 
-# ✅ Market filter: SPY above 50-day SMA
-spy_sma_50 = spy.rolling(50).mean()
-spy_trend = (spy > spy_sma_50).reindex_like(price).ffill().bfill()
+# Impulse: >0.5% up-day with volatility filter >0.5%
+volatility = price.pct_change().rolling(5).std()
+impulse = (price.pct_change(1) > 0.005) & (volatility > 0.005)
 
-# Broadcast SPY trend filter
-spy_trend_df = pd.DataFrame(
-    np.broadcast_to(spy_trend.values[:, np.newaxis], price.shape),
-    index=price.index,
-    columns=price.columns
-)
+# Entry condition: any signal fires immediately
+entries = (momentum | breakout | impulse).fillna(False)
+persistent_momentum = momentum & momentum.shift(1)
+entries = (persistent_momentum | breakout | impulse).fillna(False)
 
-# Entry condition
-entries = (momentum & spy_trend_df).fillna(False).astype(bool)
+# Track signals
+signal_source = pd.DataFrame("", index=price.index, columns=price.columns)
+signal_source[persistent_momentum] = "momentum"
+signal_source[breakout] = "breakout"
+signal_source[impulse] = "impulse"
 
-# Initialize exit signals
+# Position sizing: 2x leverage per entry
+entry_weights = entries.astype(float) * 2
+
+# Exit logic
 sl_exits = pd.DataFrame(False, index=price.index, columns=price.columns)
 tp_exits = pd.DataFrame(False, index=price.index, columns=price.columns)
-ma_exits = downcross.fillna(False).astype(bool)
+downcross = short_ma < long_ma
+ma_exits = downcross.fillna(False)
 
-# Manual SL/TP logic
-for ticker in tickers:
-    entry_dates = entries[ticker][entries[ticker]].index
-    for entry_date in entry_dates:
-        if entry_date not in price.index:
-            continue
-        entry_idx = price.index.get_loc(entry_date)
-        if entry_idx + 1 >= len(price):
-            continue
-        entry_price = price.at[entry_date, ticker]
-        forward_prices = price[ticker].iloc[entry_idx + 1:entry_idx + 16]  # 15-day SL/TP window
+# ATR-based SL/TP with extended window
+atr = price.pct_change().rolling(14).std() * price
+for col in price.columns:
+    for entry_date in entries[col][entries[col]].index:
+        idx = price.index.get_loc(entry_date)
+        if idx + 1 >= len(price): continue
+        entry_price = price.at[entry_date, col]
+        atr_val = atr.at[entry_date, col] if not pd.isna(atr.at[entry_date, col]) else entry_price * 0.02
+        sl = entry_price - 2 * atr_val
+        tp = entry_price + 4 * atr_val
+        fwd = price[col].iloc[idx+1:idx+26]
+        hit_sl = fwd[fwd <= sl]
+        hit_tp = fwd[fwd >= tp]
+        if not hit_sl.empty:
+            sl_exits.at[hit_sl.index[0], col] = True
+        elif not hit_tp.empty:
+            tp_exits.at[hit_tp.index[0], col] = True
 
-        if forward_prices.empty:
-            continue
-
-        stop_hit = forward_prices[forward_prices <= entry_price * 0.98]
-        if not stop_hit.empty:
-            sl_exits.at[stop_hit.index[0], ticker] = True
-            continue
-
-        take_hit = forward_prices[forward_prices >= entry_price * 1.06]
-        if not take_hit.empty:
-            tp_exits.at[take_hit.index[0], ticker] = True
-
-# Combine exits
-exits = (ma_exits | sl_exits | tp_exits).fillna(False).astype(bool)
+exits = (ma_exits | sl_exits | tp_exits).fillna(False)
 
 # Debug stats
 print("\n📊 Entry counts:")
@@ -104,12 +114,12 @@ print(entries.sum())
 print("✅ Any entries?", entries.any().any())
 
 # Backtest
-print("\n📈 Running backtest (with fees & slippage)...")
+print("\n📈 Running backtest...")
 pf = vbt.Portfolio.from_signals(
     close=price,
     entries=entries,
     exits=exits,
-    size=0.5,
+    size=entry_weights,
     init_cash=100_000,
     direction='longonly',
     freq='1D',
@@ -117,14 +127,20 @@ pf = vbt.Portfolio.from_signals(
     slippage=0.001
 )
 
-# Show performance
+# Results
 print("\n📊 Backtest Results:")
 print(pf.stats())
+# Plot
+# pf.plot().show()
 
-# Export trades
-trades_df = pf.trades.records_readable
-trades_df.to_csv("trade_log.csv", index=False)
-print("\n📁 Exported trades to trade_log.csv")
+# # Export trades
+# df_trades = pf.trades.records_readable.copy()
+# df_trades['Signal'] = df_trades.apply(
+#     lambda r: signal_source.at[r['Entry Timestamp'], r['Column']]
+#                   if r['Column'] in signal_source.columns and r['Entry Timestamp'] in signal_source.index else "unknown",
+#     axis=1
+# )
+# df_trades.to_csv("trade_log_with_signals.csv", index=False)
+# print("\n📁 Exported trade_log_with_signals.csv")
 
-# Done
-print(f"\n✅ Finished in {time.time() - start:.2f} seconds.")
+# print(f"\n✅ Finished in {time.time() - start:.2f}s.")
