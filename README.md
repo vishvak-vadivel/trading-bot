@@ -18,3 +18,4 @@ This bot uses Alpaca for data and VectorBT for signal generation & backtesting.
   "api_key": "your_alpaca_key",
   "secret_key": "your_secret_key"
 }
+# trigger
