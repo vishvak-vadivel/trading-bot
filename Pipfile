@@ -8,7 +8,12 @@ vectorbt = "*"
 yfinance = "*"
 dotenv = "*"
 alpaca-trade-api = "*"
+ace-tools = "*"
 seaborn = "*"
+openai = "*"
+vadersentiment = "*"
+transformers = "*"
+torch = "*"
 
 [dev-packages]
 

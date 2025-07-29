@@ -1,0 +1,38 @@
+# Ignore all config files
+config.json
+recovery.txt
+*.config.*
+*.secret.*
+*.env
+.env.*
+.envrc
+secrets.*
+*.key
+*.pem
+*.crt
+
+# Common IDE/editor configs
+.vscode/
+.idea/
+*.code-workspace
+
+# Node
+node_modules/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Logs
+*.log
+
+# OS/Editor cruft
+.DS_Store
+Thumbs.db
