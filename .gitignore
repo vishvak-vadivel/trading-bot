@@ -1,38 +1,34 @@
-# Ignore all config files
-config.json
-recovery.txt
-*.config.*
-*.secret.*
-*.env
-.env.*
-.envrc
-secrets.*
-*.key
-*.pem
-*.crt
+# 🔐 Secrets
+config/config.json
 
-# Common IDE/editor configs
-.vscode/
-.idea/
-*.code-workspace
-
-# Node
-node_modules/
-dist/
-build/
-
-# Python
+# 🐍 Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-*.pyd
-.venv/
+
+# 🧪 Environments
+.env
+.venv
 env/
 venv/
 
-# Logs
-*.log
+# 📓 Jupyter checkpoints
+.ipynb_checkpoints/
 
-# OS/Editor cruft
+# ⚙️ VSCode settings
+.vscode/
+
+# 🍎 macOS & Windows system files
 .DS_Store
 Thumbs.db
+
+# 🧹 Logs & temp
+*.log
+*.tmp
+*.bak
+
+# 📊 CSV data & results (optional – remove these if you want versioned logs)
+data/*.csv
+results/*.png
+
+# ✅ Keep models committed, so don’t ignore *.pkl
